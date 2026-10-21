@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>CyberShield | Security audit</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="CyberShield home">CYBERSHIELD</a>
+      <div class="sidebar-content">
+        <p class="eyebrow">AUTHORIZED TESTING</p>
+        <h2>Run an audit</h2>
+        <p class="muted">Check security headers, cookies, and CORS settings for a target you are authorized to test.</p>
+        <form id="audit-form">
+          <label for="target-url">Target URL</label>
+          <input id="target-url" name="url" type="text" inputmode="url"
+                 placeholder="https://your-domain.example" autocomplete="url" required>
+          <label class="authorization">
+            <input id="authorization" name="authorized" type="checkbox" required>
+            <span>I own this target or have permission to test it.</span>
+          </label>
+          <button id="audit-button" type="submit">Run security audit</button>
+          <p id="form-message" class="form-message" role="status" aria-live="polite"></p>
+        </form>
+        <div class="sidebar-divider"></div>
+        <h2 class="small-heading">View a saved report</h2>
+        <label class="file-picker" for="report-file">Choose JSON report</label>
+        <input id="report-file" type="file" accept=".json,application/json">
+        <label for="report-json" class="visually-hidden">Or paste JSON report</label>
+        <textarea id="report-json" rows="5" placeholder="Or paste report JSON here"></textarea>
+        <button id="load-report" class="secondary-button" type="button">Load report</button>
+      </div>
+      <p class="sidebar-note">Audits are sent from this computer. This app listens on localhost only.</p>
+    </aside>
+
+    <main class="main-content">
+      <header class="hero">
+        <p class="eyebrow">SECURITY POSTURE / REPORTS</p>
+        <h1>Audit overview</h1>
+        <p>One clear view of the security headers, cookies, and CORS checks in your report.</p>
+      </header>
+      <section id="empty-state" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">↗</div>
+        <h2>Your report will appear here</h2>
+        <p>Enter an authorized target in the sidebar, or load a saved JSON report.</p>
+      </section>
+      <section id="report" class="report" hidden>
+        <p id="report-source" class="report-source"></p>
+        <div id="metrics" class="metrics"></div>
+        <div class="results-heading">
+          <h2>Target details</h2>
+          <label for="status-filter" class="visually-hidden">Filter checks</label>
+          <select id="status-filter">
+            <option value="all">All checks</option>
+            <option value="issues">Issues only</option>
+            <option value="fail">Failures only</option>
+          </select>
+        </div>
+        <div id="target-list" class="target-list"></div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const form = document.querySelector("#audit-form");
+    const formMessage = document.querySelector("#form-message");
+    const auditButton = document.querySelector("#audit-button");
+    const reportFile = document.querySelector("#report-file");
+    let currentResults = [];
+
+    function showError(message) {
+      formMessage.textContent = message;
+      formMessage.className = "form-message error";
+    }
+
+    function validReport(payload) {
+      const results = Array.isArray(payload) ? payload : [payload];
+      if (!results.length || results.some((result) =>
+        !result || typeof result.url !== "string" ||
+        (!result.error && !Array.isArray(result.findings)) ||
+        (result.findings || []).some((finding) =>
+          !finding || !["pass", "warn", "fail"].includes(finding.status) ||
+          typeof finding.check !== "string"
+        )
+      )) {
+        throw new Error("This file does not contain a valid audit report.");
+      }
+      return results;
+    }
+
+    function addMetric(container, label, value, hint) {
+      const card = document.createElement("article");
+      card.className = "metric";
+      const title = document.createElement("span");
+      title.className = "metric-label";
+      title.textContent = label;
+      const number = document.createElement("strong");
+      number.className = "metric-value";
+      number.textContent = value;
+      const caption = document.createElement("span");
+      caption.className = "metric-hint";
+      caption.textContent = hint;
+      card.append(title, number, caption);
+      container.append(card);
+    }
+
+    function renderReport(results, source) {
+      currentResults = validReport(results);
+      const findings = currentResults.flatMap((result) => result.findings || []);
+      const passed = findings.filter((finding) => finding.status === "pass").length;
+      const warnings = findings.filter((finding) => finding.status === "warn").length;
+      const failures = findings.filter((finding) => finding.status === "fail").length;
+      const metrics = document.querySelector("#metrics");
+      metrics.replaceChildren();
+      addMetric(metrics, "Targets", currentResults.length, "in this report");
+      addMetric(metrics, "Checks passed", passed, "no issue reported");
+      addMetric(metrics, "Warnings", warnings, "review recommended");
+      addMetric(metrics, "Failures", failures, "attention required");
+      document.querySelector("#report-source").textContent =
+        `${source} | ${currentResults.length} target(s)`;
+      document.querySelector("#empty-state").hidden = true;
+      document.querySelector("#report").hidden = false;
+      renderTargets();
+    }
+
+    function renderTargets() {
+      const targetList = document.querySelector("#target-list");
+      const filter = document.querySelector("#status-filter").value;
+      targetList.replaceChildren();
+
+      for (const result of currentResults) {
+        const card = document.createElement("article");
+        card.className = "target-card";
+        const heading = document.createElement("h3");
+        heading.className = "target-url";
+        heading.textContent = result.url;
+        card.append(heading);
+
+        if (result.error) {
+          const error = document.createElement("p");
+          error.className = "finding-detail error";
+          error.textContent = result.error;
+          card.append(error);
+          targetList.append(card);
+          continue;
+        }
+
+        const summary = document.createElement("p");
+        summary.className = "target-summary";
+        const targetFailures = result.findings.filter((item) => item.status === "fail").length;
+        const targetWarnings = result.findings.filter((item) => item.status === "warn").length;
+        summary.textContent = `${targetFailures} failures | ${targetWarnings} warnings`;
+        card.append(summary);
+
+        const finalUrl = document.createElement("p");
+        finalUrl.className = "final-url";
+        finalUrl.textContent = `Final URL: ${result.final_url || result.url} | HTTP ${result.http_status ?? "n/a"}`;
+        card.append(finalUrl);
+
+        const table = document.createElement("div");
+        table.className = "findings";
+        for (const finding of result.findings) {
+          if (filter === "issues" && finding.status === "pass") continue;
+          if (filter === "fail" && finding.status !== "fail") continue;
+          const row = document.createElement("div");
+          row.className = "finding-row";
+          const name = document.createElement("strong");
+          name.textContent = finding.check;
+          const status = document.createElement("span");
+          status.className = `pill ${finding.status}`;
+          status.textContent = finding.status;
+          const detail = document.createElement("span");
+          detail.className = "finding-detail";
+          detail.textContent = finding.detail || "";
+          row.append(name, status, detail);
+          table.append(row);
+        }
+        if (!table.childElementCount) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No checks match this filter.";
+          table.append(empty);
+        }
+        card.append(table);
+        targetList.append(card);
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      formMessage.textContent = "";
+      const url = document.querySelector("#target-url").value.trim();
+      if (!document.querySelector("#authorization").checked) {
+        showError("Confirm that you are authorized to test this target.");
+        return;
+      }
+      auditButton.disabled = true;
+      auditButton.textContent = "Auditing...";
+      try {
+        const response = await fetch("/api/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, authorized: true })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "The audit request failed.");
+        renderReport(payload, "Live audit");
+      } catch (error) {
+        showError(error.message || "Could not reach the local audit service.");
+      } finally {
+        auditButton.disabled = false;
+        auditButton.textContent = "Run security audit";
+      }
+    });
+
+    document.querySelector("#load-report").addEventListener("click", async () => {
+      try {
+        let text = document.querySelector("#report-json").value.trim();
+        if (reportFile.files.length) text = await reportFile.files[0].text();
+        if (!text) throw new Error("Choose a JSON file or paste a report first.");
+        renderReport(JSON.parse(text), reportFile.files.length ? reportFile.files[0].name : "Pasted report");
+        formMessage.textContent = "";
+      } catch (error) {
+        showError(error.message || "Could not read this JSON report.");
+      }
+    });
+
+    document.querySelector("#status-filter").addEventListener("change", renderTargets);
+  </script>
+</body>
+</html>
