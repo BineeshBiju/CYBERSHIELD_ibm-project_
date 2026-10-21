@@ -1,2 +1,8 @@
+# HTTP client used by the security-header and CORS auditor.
 requests
-streamlit
+
+# Python standard-library modules used by the app (included with Python):
+# json
+# http.server
+# pathlib
+# urllib.parse
